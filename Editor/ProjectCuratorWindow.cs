@@ -13,25 +13,60 @@ namespace Ogxd.ProjectCurator
             GetWindow<ProjectCuratorWindow>("Project Curator");
         }
 
-        // -----------------------------
-        // Lock State (NEW)
-        // -----------------------------
-        // When locked, window will not update on selection change
+        // =========================================================
+        // LOCK STATE
+        // =========================================================
+        // When locked:
+        // - Window ignores Selection changes
+        // - Asset displayed is controlled by stored GUID
+        // - Double-click in Project window will override locked asset
         private bool isLocked = false;
         private string lockedGuid = null;
 
-        public ProjectCuratorWindow()
+        private void OnEnable()
         {
             Selection.selectionChanged += OnSelectionChanged;
+
+            // Register callback to detect double click in Project window
+            EditorApplication.projectWindowItemOnGUI += OnProjectWindowItemGUI;
+        }
+
+        private void OnDisable()
+        {
+            Selection.selectionChanged -= OnSelectionChanged;
+            EditorApplication.projectWindowItemOnGUI -= OnProjectWindowItemGUI;
         }
 
         private void OnSelectionChanged()
         {
-            // Prevent repaint if locked
+            // If locked, ignore selection change
             if (isLocked)
                 return;
 
             Repaint();
+        }
+
+        // =========================================================
+        // DOUBLE CLICK HANDLING (NEW FEATURE)
+        // =========================================================
+        // When locked and user double-clicks an asset in Project window:
+        // -> Replace locked asset with that asset
+        private void OnProjectWindowItemGUI(string guid, Rect selectionRect)
+        {
+            if (!isLocked)
+                return;
+
+            Event e = Event.current;
+
+            if (e.type == EventType.MouseDown &&
+                e.button == 0 &&
+                e.clickCount == 2 &&
+                selectionRect.Contains(e.mousePosition))
+            {
+                lockedGuid = guid;
+                Repaint();
+                e.Use();
+            }
         }
 
         private Vector2 scroll;
@@ -41,7 +76,10 @@ namespace Ogxd.ProjectCurator
 
         private static GUIStyle titleStyle;
         private static GUIStyle TitleStyle =>
-            titleStyle ?? (titleStyle = new GUIStyle(EditorStyles.label) { fontSize = 13 });
+            titleStyle ?? (titleStyle = new GUIStyle(EditorStyles.label)
+            {
+                fontSize = 13
+            });
 
         private static GUIStyle itemStyle;
         private static GUIStyle ItemStyle =>
@@ -52,9 +90,11 @@ namespace Ogxd.ProjectCurator
 
         private void OnGUI()
         {
-            // --------------------------------
-            // Selection handling with Lock
-            // --------------------------------
+            // =========================================================
+            // DETERMINE CURRENT ASSET PATH
+            // =========================================================
+            // If locked -> use stored GUID
+            // If unlocked -> use active selection
             string selectedPath;
 
             if (isLocked && !string.IsNullOrEmpty(lockedGuid))
@@ -75,27 +115,34 @@ namespace Ogxd.ProjectCurator
 
             GUILayout.BeginHorizontal("In BigTitle");
 
-            GUILayout.Label(AssetDatabase.GetCachedIcon(selectedPath),
-                GUILayout.Width(36), GUILayout.Height(36));
+            GUILayout.Label(
+                AssetDatabase.GetCachedIcon(selectedPath),
+                GUILayout.Width(36),
+                GUILayout.Height(36));
 
             GUILayout.BeginVertical();
+
             GUILayout.Label(Path.GetFileName(selectedPath), TitleStyle);
 
+            // Display directory without "Assets/" prefix
             GUILayout.Label(
                 Regex.Match(Path.GetDirectoryName(selectedPath) ?? "", "(\\\\.*)$").Value
             );
 
             rect = GUILayoutUtility.GetLastRect();
-            GUILayout.EndVertical();
 
+            GUILayout.EndVertical();
             GUILayout.Space(44);
             GUILayout.EndHorizontal();
 
-            // --------------------------------
-            // Lock Toggle (Inspector style)
-            // --------------------------------
+            // =========================================================
+            // LOCK TOGGLE (Inspector-style)
+            // =========================================================
             Rect lockRect = new Rect(position.width - 25, 6, 20, 20);
-            bool newLockState = GUI.Toggle(lockRect, isLocked,
+
+            bool newLockState = GUI.Toggle(
+                lockRect,
+                isLocked,
                 EditorGUIUtility.IconContent("IN LockButton"));
 
             if (newLockState != isLocked)
@@ -104,7 +151,7 @@ namespace Ogxd.ProjectCurator
 
                 if (isLocked)
                 {
-                    // Store GUID of currently displayed asset
+                    // Store currently displayed asset GUID
                     lockedGuid = AssetDatabase.AssetPathToGUID(selectedPath);
                 }
                 else
@@ -149,10 +196,15 @@ namespace Ogxd.ProjectCurator
                     : ProjectIcons.LinkBlack,
                 selectedAssetInfo.IncludedStatus.ToString());
 
-            GUI.Label(new Rect(position.width - 45, rect.y + 1, 16, 16), content);
+            GUI.Label(
+                new Rect(position.width - 45, rect.y + 1, 16, 16),
+                content);
 
             scroll = GUILayout.BeginScrollView(scroll);
 
+            // =========================================================
+            // DEPENDENCIES
+            // =========================================================
             dependenciesOpen = EditorGUILayout.Foldout(
                 dependenciesOpen,
                 $"Dependencies ({selectedAssetInfo.dependencies.Count})");
@@ -165,6 +217,9 @@ namespace Ogxd.ProjectCurator
 
             GUILayout.Space(6);
 
+            // =========================================================
+            // REFERENCERS
+            // =========================================================
             referencesOpen = EditorGUILayout.Foldout(
                 referencesOpen,
                 $"Referencers ({selectedAssetInfo.referencers.Count})");
@@ -178,6 +233,9 @@ namespace Ogxd.ProjectCurator
             GUILayout.Space(5);
             GUILayout.EndScrollView();
 
+            // =========================================================
+            // UNUSED ASSET WARNING
+            // =========================================================
             if (!selectedAssetInfo.IsIncludedInBuild)
             {
                 bool deleteClicked = HelpBoxWithButton(
@@ -195,11 +253,16 @@ namespace Ogxd.ProjectCurator
             }
         }
 
+        // =========================================================
+        // RENDER DEPENDENCY / REFERENCER ITEM
+        // =========================================================
         void RenderOtherAsset(string guid)
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
 
-            if (GUILayout.Button(new GUIContent(Path.GetFileName(path), path), ItemStyle))
+            if (GUILayout.Button(
+                new GUIContent(Path.GetFileName(path), path),
+                ItemStyle))
             {
                 Selection.activeObject =
                     AssetDatabase.LoadAssetAtPath<Object>(path);
@@ -226,26 +289,35 @@ namespace Ogxd.ProjectCurator
 
         void IHasCustomMenu.AddItemsToMenu(GenericMenu menu)
         {
-            menu.AddItem(new GUIContent("Rebuild Database"),
-                false, ProjectCurator.RebuildDatabase);
+            menu.AddItem(
+                new GUIContent("Rebuild Database"),
+                false,
+                ProjectCurator.RebuildDatabase);
 
-            menu.AddItem(new GUIContent("Clear Database"),
-                false, ProjectCurator.ClearDatabase);
+            menu.AddItem(
+                new GUIContent("Clear Database"),
+                false,
+                ProjectCurator.ClearDatabase);
 
-            menu.AddItem(new GUIContent("Project Overlay"),
+            menu.AddItem(
+                new GUIContent("Project Overlay"),
                 ProjectWindowOverlay.Enabled,
                 () => { ProjectWindowOverlay.Enabled = !ProjectWindowOverlay.Enabled; });
         }
 
-        public bool HelpBoxWithButton(GUIContent messageContent, GUIContent buttonContent)
+        // =========================================================
+        // HELP BOX WITH BUTTON
+        // =========================================================
+        public bool HelpBoxWithButton(
+            GUIContent messageContent,
+            GUIContent buttonContent)
         {
             float buttonWidth = buttonContent.text.Length * 8;
             const float buttonSpacing = 5f;
             const float buttonHeight = 18f;
 
-            Rect contentRect = GUILayoutUtility.GetRect(
-                messageContent,
-                EditorStyles.helpBox);
+            Rect contentRect =
+                GUILayoutUtility.GetRect(messageContent, EditorStyles.helpBox);
 
             GUILayoutUtility.GetRect(1, buttonHeight + buttonSpacing);
 

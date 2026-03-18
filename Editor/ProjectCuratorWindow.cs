@@ -138,12 +138,8 @@ namespace Ogxd.ProjectCurator
             // =========================================================
             // LOCK TOGGLE (Inspector-style)
             // =========================================================
-            Rect lockRect = new Rect(position.width - 25, 6, 20, 20);
-
-            bool newLockState = GUI.Toggle(
-                lockRect,
-                isLocked,
-                EditorGUIUtility.IconContent("IN LockButton"));
+            Rect lockRect = new Rect(position.width - 25, 27, 25, 25);
+            bool newLockState = GUI.Toggle(lockRect, isLocked, GUIContent.none, "IN LockButton");
 
             if (newLockState != isLocked)
             {
